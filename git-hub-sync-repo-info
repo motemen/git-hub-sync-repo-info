@@ -1,0 +1,81 @@
+#!/usr/bin/env ruby
+
+require 'uri'
+require 'net/http'
+require 'json' unless defined? ::JSON
+require 'pathname'
+
+def git(*args)
+  %x(git #{args.join(' ')}).chomp
+end
+
+INFO_FILES = {
+  'description' => {
+    :default => %(Unnamed repository; edit this file 'description' to name the repository.),
+  },
+  'homepage' => {
+  }
+}
+
+origin = ARGV.shift || 'origin'
+
+remote_url = git 'config', "remote.#{origin}.url"
+abort if remote_url.empty?
+
+unless %r(^\w+://) === remote_url
+  remote_url.sub!(%r<([^/]+):>, '\1/').sub!(/^/, 'ssh://').sub!(/\.git$/, '')
+end
+
+git_dir = Pathname.new(git 'rev-parse', '--git-dir')
+abort if git_dir.to_s.empty?
+
+api = Net::HTTP.new('api.github.com', 443)
+api.use_ssl = true
+api.start
+api_path = begin
+  user, repo = URI(remote_url).path.split('/').last(2)
+  "/repos/#{user}/#{repo}"
+end
+
+res = api.get(api_path)
+abort "Failed to fetch repo info: got #{res.code}" unless /^2\d\d$/ === res.code
+
+remote_info = JSON.parse(res.body)
+local_changes = {}
+
+INFO_FILES.each do |key,data|
+  local_file = git_dir + key
+  local_value = local_file.read.chomp rescue ''
+  remote_value = remote_info[key]
+
+  puts "# #{key}:"
+  puts "#   local  = #{local_value}"
+  puts "#   remote = #{remote_value}"
+
+  if local_value.empty? or local_value == data[:default]
+    # Empty or default value, so update with remote information.
+    if remote_value and not remote_value.empty?
+      local_file.write(remote_value + "\n")
+      puts "Updated #{local_file}: [#{remote_value}]"
+    end
+  elsif local_value != remote_info[key]
+    # Locally modified
+    local_changes[key] = local_value
+  end
+end
+
+if not local_changes.empty?
+  token = git 'config', '--get', 'hub-sync-repo-info.token'
+  abort 'Cannot obtain GitHub API token while pushing; Set one with git config hub-sync-repo-info.token <token>' if token.empty?
+
+  res = api.post(
+    api_path,
+    local_changes.merge({ 'name' => remote_info['name'] }).to_json,
+    { 'Authorization' => "token #{token}" }
+  )
+  abort "Failed to push repo info: got #{res.code}" unless /^2\d\d$/ === res.code
+
+  local_changes.each do |k,v|
+    puts "Updated remote #{k}: [#{v}]"
+  end
+end
