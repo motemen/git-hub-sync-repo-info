@@ -26,10 +26,10 @@ Updated remote description: [Synchronize .git/description and .git/homepage file
 How To Use It
 -------------
 
- 1. [Generate a GitHub personal access token](https://github.com/settings/applications)
+ 1. [Generate a GitHub personal access token](https://github.com/settings/tokens/new)
  2. Store that token
 
-        git config --global hub-sync-repo-info.token TOKEN
+        % git config --global hub-sync-repo-info.token TOKEN
 
  3. Write .git/description or .git/homepage if you want to update them
  4. Run `git-hub-sync-repo-info`
